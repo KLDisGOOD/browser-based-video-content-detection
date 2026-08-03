@@ -416,6 +416,22 @@ code {
   max-width: 100%;
 }
 
+.figure-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+}
+
+.figure-frame.is-screenshot {
+  padding: 0;
+  background: var(--gray-8);
+}
+
+.figure-frame.is-screenshot + .figure-caption {
+  margin-top: 12px;
+}
+
 .figure-caption {
   display: flex;
   align-items: baseline;

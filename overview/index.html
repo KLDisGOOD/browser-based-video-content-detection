@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Engineering Submission: Browser-Based Video Content Detection · Overview</title>
-  <link rel="stylesheet" href="/overview/styles.css?v=2" />
+  <link rel="stylesheet" href="/overview/styles.css?v=3" />
   <style>
     /* Local additions for the prototype UI mockups. Kept inline so the
        submission page is self-contained and reuses the white-paper tokens. */
@@ -563,6 +563,53 @@ await tf.setBackend('webgpu')   <span class="comment">// fastest, where supporte
             <tr><td>TensorFlow.js Backend</td><td></td></tr>
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>Benchmark screenshots</h3>
+      <div class="prose">
+        <p>The prototype prints the metrics above after each run. The following screenshots are captured from real runs across a range of target devices. Browser-ML performance varies too widely across hardware for a single number to be meaningful, so each device is reported individually.</p>
+      </div>
+
+      <div class="figure">
+        <div class="figure-frame is-screenshot">
+          <img src="/overview/screenshots/ipadpro13-2024.png" alt="Prototype benchmark run on iPad Pro 13 (2024)" loading="lazy" />
+        </div>
+        <div class="figure-caption">
+          <span class="figure-num">FIG. 2</span>
+          <p>Benchmark run on iPad Pro 13" (2024).</p>
+        </div>
+      </div>
+
+      <div class="figure">
+        <div class="figure-frame is-screenshot">
+          <img src="/overview/screenshots/pixel-10.png" alt="Prototype benchmark run on Google Pixel 10" loading="lazy" />
+        </div>
+        <div class="figure-caption">
+          <span class="figure-num">FIG. 3</span>
+          <p>Benchmark run on Google Pixel 10.</p>
+        </div>
+      </div>
+
+      <div class="figure">
+        <div class="figure-frame is-screenshot">
+          <img src="/overview/screenshots/s25-utra-and-17promax.png" alt="Prototype benchmark run on Samsung Galaxy S25 Ultra and iPhone 17 Pro Max" loading="lazy" />
+        </div>
+        <div class="figure-caption">
+          <span class="figure-num">FIG. 4</span>
+          <p>Benchmark run on Samsung Galaxy S25 Ultra and iPhone 17 Pro Max.</p>
+        </div>
+      </div>
+
+      <div class="figure">
+        <div class="figure-frame is-screenshot">
+          <img src="/overview/screenshots/tab-s8.png" alt="Prototype benchmark run on Samsung Galaxy Tab S8" loading="lazy" />
+        </div>
+        <div class="figure-caption">
+          <span class="figure-num">FIG. 5</span>
+          <p>Benchmark run on Samsung Galaxy Tab S8.</p>
+        </div>
       </div>
     </div>
   </section>
