@@ -470,7 +470,25 @@ function calibrateSigmoid(samples, opts = {}) {
 function seekTo(vid, time) {
   return new Promise((resolve, reject) => {
     let done = false;
-    const onSeeked = () => { if (done) return; done = true; cleanup(); resolve(); };
+    // The `seeked` event fires when the seek completes internally, but on
+    // mobile browsers (esp. iOS Safari) the video element's displayed frame
+    // is not yet repainted by the compositor. Drawing to canvas at that
+    // moment captures a stale/black frame, which the classifier scores as
+    // Neutral ~100% -> every frame reads "neutral 0". Wait for a real paint
+    // cycle before resolving so drawImage() reads the actual seeked frame.
+    const finish = () => { if (done) return; done = true; cleanup(); resolve(); };
+    const onSeeked = () => {
+      if (done) return;
+      if (typeof vid.requestVideoFrameCallback === "function") {
+        // Fires when a new frame has been presented to the compositor.
+        vid.requestVideoFrameCallback(finish);
+        // Fallback in case rVFC never fires (paused/seeked on some UAs).
+        setTimeout(finish, 60);
+      } else {
+        // Two rAFs guarantee the compositor has painted the new frame.
+        requestAnimationFrame(() => requestAnimationFrame(finish));
+      }
+    };
     const onError = () => { if (done) return; done = true; cleanup(); reject(new Error("Seek failed")); };
     const cleanup = () => {
       vid.removeEventListener("seeked", onSeeked);
