@@ -86,22 +86,86 @@ document.querySelectorAll(".seg-item").forEach((t) =>
 // ---- Model loading (lazy, async) --------------------------------------
 // Backend priority: WebGPU (fastest) -> WebGL -> WASM -> CPU (always works).
 // Backends are registered by the <script> tags in index.html.
-async function selectBackend() {
-  const order = ["webgpu", "webgl", "wasm", "cpu"];
-  for (const name of order) {
-    try {
-      if (!tf.findBackend(name)) continue;
-      if (name === "wasm" && tf.wasm) {
-        tf.wasm.setWasmPaths(
-          "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/"
-        );
-      }
-      const ok = await tf.setBackend(name);
-      if (ok) return name;
-    } catch (e) { /* backend registered but failed to init — try next */ }
+//
+// On mobile, the WebGL/WebGPU backend can silently miscompute the
+// MobileNetV2Mid graph model (texture-precision / missing-op issues): the
+// conv stack collapses, so the final dense layer emits only its bias terms.
+// Because Neutral carries the highest class bias, EVERY frame scores as
+// Neutral with ~0 probability elsewhere — the "all neutral 0" failure. The
+// output becomes independent of the input, so we detect this by running the
+// model on two distinct synthetic images and rejecting any backend whose
+// output doesn't change with the input. We then fall through to WASM/CPU.
+
+const WASM_PATH =
+  "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/";
+
+function checkModelBundles() {
+  const w = window;
+  const modelJson = w.model;
+  const shard1 = w.group1_shard1of2;
+  const shard2 = w.group1_shard2of2;
+  if (!modelJson || !shard1 || !shard2) {
+    throw new Error(
+      "Model bundles missing. Hard-reload (Ctrl+Shift+R) to bust cache so " +
+        "index.html loads the three mobilenet_v2_mid <script> tags " +
+        "(model.min.js, group1-shard1of2.min.js, group1-shard2of2.min.js)."
+    );
   }
-  await tf.setBackend("cpu"); // absolute fallback
-  return "cpu";
+  if (modelJson.format !== "graph-model") {
+    throw new Error(
+      "Wrong model format (got " + (modelJson.format || "layers") +
+        "). Hard-reload (Ctrl+Shift+R) to load the mobilenet_v2_mid graph bundle."
+    );
+  }
+}
+
+// Two deliberately different synthetic images. A healthy backend yields
+// different class distributions for them; a dead backend (output is just the
+// final-layer biases, independent of input) yields identical outputs.
+function syntheticCanvas(variant) {
+  const c = document.createElement("canvas");
+  c.width = c.height = CFG.classifyEdge;
+  const cx = c.getContext("2d");
+  if (variant === 0) {
+    cx.fillStyle = "#000";
+    cx.fillRect(0, 0, c.width, c.height);
+  } else {
+    const img = cx.createImageData(c.width, c.height);
+    const d = img.data;
+    let s = 0x5bd1e995;
+    const rand = () => {
+      s = (Math.imul(s ^ (s >>> 15), 0x2c1b3c6d)) ^ (s >>> 13);
+      return (s >>> 0) / 4294967296;
+    };
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = rand() * 255;
+      d[i + 1] = rand() * 255;
+      d[i + 2] = rand() * 255;
+      d[i + 3] = 255;
+    }
+    cx.putImageData(img, 0, 0);
+  }
+  return c;
+}
+
+// Run the model on two distinct inputs and reject the backend if the output
+// is non-finite OR identical for both inputs (the signature of a broken
+// backend whose output no longer depends on the input).
+async function backendIsHealthy(m) {
+  try {
+    const a = await m.classify(syntheticCanvas(0));
+    const b = await m.classify(syntheticCanvas(1));
+    const va = a.map((p) => p.probability);
+    const vb = b.map((p) => p.probability);
+    if (!va.length || va.length !== vb.length) return false;
+    for (let i = 0; i < va.length; i++) {
+      if (!Number.isFinite(va[i]) || !Number.isFinite(vb[i])) return false;
+      if (Math.abs(va[i] - vb[i]) > 1e-4) return true; // input-dependent => alive
+    }
+    return false; // outputs identical across inputs => dead backend
+  } catch (e) {
+    return false;
+  }
 }
 
 async function getModel() {
@@ -110,30 +174,32 @@ async function getModel() {
   setStatus("Loading model…");
   setRing("loading", "…");
   const tLoad = performance.now();
-  await selectBackend();
-  await tf.ready();
   modelLoading = (async () => {
-    // Load MobileNetV2Mid (~93% accuracy) as a graph model to cut false
-    // positives vs the default MobileNetV2 (~90%). Weights ship via three
-    // <script> tags in index.html (model + two shards); inference is local.
-    const w = window;
-    const modelJson = w.model;
-    const shard1 = w.group1_shard1of2;
-    const shard2 = w.group1_shard2of2;
-    if (!modelJson || !shard1 || !shard2) {
-      throw new Error(
-        "Model bundles missing. Hard-reload (Ctrl+Shift+R) to bust cache so " +
-          "index.html loads the three mobilenet_v2_mid <script> tags " +
-          "(model.min.js, group1-shard1of2.min.js, group1-shard2of2.min.js)."
-      );
+    checkModelBundles();
+    const order = ["webgpu", "webgl", "wasm", "cpu"];
+    for (const name of order) {
+      try {
+        if (!tf.findBackend(name)) continue;
+        if (name === "wasm" && tf.wasm) tf.wasm.setWasmPaths(WASM_PATH);
+        const ok = await tf.setBackend(name);
+        if (!ok) continue;
+        await tf.ready();
+        setStatus(`Loading model (${name})…`);
+        const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
+        if (await backendIsHealthy(m)) {
+          model = m;
+          return m;
+        }
+        // Backend produced input-independent (dead) output — dispose and
+        // try the next backend. Common on mobile WebGL/WebGPU.
+        try { m.dispose(); } catch (e) { /* ignore */ }
+        setStatus(`Backend ${name} failed validation, retrying…`);
+      } catch (e) { /* backend unavailable or load failed — try next */ }
     }
-    const isGraph = modelJson.format === "graph-model";
-    if (!isGraph) {
-      throw new Error(
-        "Wrong model format (got " + (modelJson.format || "layers") +
-          "). Hard-reload (Ctrl+Shift+R) to load the mobilenet_v2_mid graph bundle."
-      );
-    }
+    // Absolute fallback: CPU always works (just slow).
+    await tf.setBackend("cpu");
+    await tf.ready();
+    setStatus("Loading model (cpu)…");
     const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
     model = m;
     return m;
