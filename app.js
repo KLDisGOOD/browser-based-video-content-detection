@@ -257,11 +257,16 @@ async function getModel() {
         dbg("wasm: tf.wasm undefined (backend script not loaded?)");
       }
     } catch (e) { dbg("wasm: setWasmPaths error " + (e && e.message || e)); }
-    dbg(`wasm registered=${!!tf.findBackend("wasm")}`);
+    // NOTE: use findBackendFactory (not findBackend). findBackend() triggers an
+    // async init for registered-but-uninitialized backends (WASM) and returns
+    // null until that completes, which falsely looks "not registered" and made
+    // WASM fall back to CPU. findBackendFactory() returns the factory without
+    // initializing.
+    dbg(`wasm registered=${!!tf.findBackendFactory && !!tf.findBackendFactory("wasm")}`);
     dbg(`backend order: ${order.join(",")}${forced ? " (forced via ?backend=)" : ""}`);
     for (const name of order) {
       try {
-        if (!tf.findBackend(name)) { dbg(`backend ${name}: not registered`); continue; }
+        if (!tf.findBackendFactory(name)) { dbg(`backend ${name}: not registered`); continue; }
         if (name === "webgl") {
           try { dbg(`webgl float32 capable=${tf.env().get("WEBGL_RENDER_FLOAT32_CAPABLE")} enabled=${tf.env().get("WEBGL_RENDER_FLOAT32_ENABLED")}`); } catch (e) {}
         }
