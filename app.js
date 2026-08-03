@@ -62,36 +62,12 @@ const ringLabel = $("ringLabel");
 const resultJson = $("resultJson");
 const frameChart = $("frameChart");
 const frameList = $("frameList");
-const debugLog = $("debugLog");
-const debugThumb = $("debugThumb");
-
-// Visible + console debug log. Append-only; cleared at the start of each run.
-function dbg(msg) {
-  const line = msg == null ? "" : String(msg);
-  if (debugLog) debugLog.textContent += line + "\n";
-  console.log("%c[dbg] " + line, "color:#08f");
-}
-
-// Summarize the pixels of the classify canvas to detect black/empty frames.
-function canvasStats(cctx, w, h) {
-  let d;
-  try { d = cctx.getImageData(0, 0, w, h).data; } catch (e) { return { error: String(e) }; }
-  let sum = 0, min = 255, max = 0, n = w * h;
-  for (let i = 0; i < d.length; i += 4) {
-    const lum = (d[i] + d[i + 1] + d[i + 2]) / 3;
-    sum += lum;
-    if (lum < min) min = lum;
-    if (lum > max) max = lum;
-  }
-  return { mean: Math.round(sum / n), min, max, uniform: max - min < 2, size: `${w}x${h}` };
-}
 
 // ---- State -------------------------------------------------------------
 let model = null;
 let modelLoading = null;
 let currentVideoURL = null;   // canonical URL the user typed (for messages)
 let currentVideoSrc = null;   // actual src assigned to <video> (url or blob:) — revoke if blob
-let dbgFrameIndex = 0;        // increments per classified frame; used for debug capture
 
 // ---- Tabs --------------------------------------------------------------
 document.querySelectorAll(".seg-item").forEach((t) =>
@@ -110,105 +86,22 @@ document.querySelectorAll(".seg-item").forEach((t) =>
 // ---- Model loading (lazy, async) --------------------------------------
 // Backend priority: WebGPU (fastest) -> WebGL -> WASM -> CPU (always works).
 // Backends are registered by the <script> tags in index.html.
-//
-// On mobile, the WebGL/WebGPU backend can silently miscompute the
-// MobileNetV2Mid graph model (texture-precision / missing-op issues): the
-// conv stack collapses, so the final dense layer emits only its bias terms.
-// Because Neutral carries the highest class bias, EVERY frame scores as
-// Neutral with ~0 probability elsewhere — the "all neutral 0" failure. The
-// output becomes independent of the input, so we detect this by running the
-// model on two distinct synthetic images and rejecting any backend whose
-// output doesn't change with the input. We then fall through to WASM/CPU.
-
-const WASM_PATH =
-  "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/";
-
-function checkModelBundles() {
-  const w = window;
-  const modelJson = w.model;
-  const shard1 = w.group1_shard1of2;
-  const shard2 = w.group1_shard2of2;
-  if (!modelJson || !shard1 || !shard2) {
-    throw new Error(
-      "Model bundles missing. Hard-reload (Ctrl+Shift+R) to bust cache so " +
-        "index.html loads the three mobilenet_v2_mid <script> tags " +
-        "(model.min.js, group1-shard1of2.min.js, group1-shard2of2.min.js)."
-    );
+async function selectBackend() {
+  const order = ["webgpu", "webgl", "wasm", "cpu"];
+  for (const name of order) {
+    try {
+      if (!tf.findBackend(name)) continue;
+      if (name === "wasm" && tf.wasm) {
+        tf.wasm.setWasmPaths(
+          "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/"
+        );
+      }
+      const ok = await tf.setBackend(name);
+      if (ok) return name;
+    } catch (e) { /* backend registered but failed to init — try next */ }
   }
-  if (modelJson.format !== "graph-model") {
-    throw new Error(
-      "Wrong model format (got " + (modelJson.format || "layers") +
-        "). Hard-reload (Ctrl+Shift+R) to load the mobilenet_v2_mid graph bundle."
-    );
-  }
-}
-
-// Two deliberately different synthetic images. A healthy backend yields
-// different class distributions for them; a dead backend (output is just the
-// final-layer biases, independent of input) yields identical outputs.
-function syntheticCanvas(variant) {
-  const c = document.createElement("canvas");
-  c.width = c.height = CFG.classifyEdge;
-  const cx = c.getContext("2d");
-  if (variant === 0) {
-    cx.fillStyle = "#000";
-    cx.fillRect(0, 0, c.width, c.height);
-  } else {
-    const img = cx.createImageData(c.width, c.height);
-    const d = img.data;
-    let s = 0x5bd1e995;
-    const rand = () => {
-      s = (Math.imul(s ^ (s >>> 15), 0x2c1b3c6d)) ^ (s >>> 13);
-      return (s >>> 0) / 4294967296;
-    };
-    for (let i = 0; i < d.length; i += 4) {
-      d[i] = rand() * 255;
-      d[i + 1] = rand() * 255;
-      d[i + 2] = rand() * 255;
-      d[i + 3] = 255;
-    }
-    cx.putImageData(img, 0, 0);
-  }
-  return c;
-}
-
-// Run the model on two distinct inputs and reject the backend if the output
-// is non-finite OR identical for both inputs (the signature of a broken
-// backend whose output no longer depends on the input).
-async function backendIsHealthy(m) {
-  try {
-    const a = await m.classify(syntheticCanvas(0));
-    const b = await m.classify(syntheticCanvas(1));
-    const va = a.map((p) => p.probability);
-    const vb = b.map((p) => p.probability);
-    const fmt = (arr) => arr.map((x) => +x.toFixed(4)).join(",");
-    dbg(`  synth black: [${fmt(va)}]`);
-    dbg(`  synth noise: [${fmt(vb)}]`);
-    if (!va.length || va.length !== vb.length) return false;
-    // (1) finite outputs
-    for (let i = 0; i < va.length; i++) {
-      if (!Number.isFinite(va[i]) || !Number.isFinite(vb[i])) return false;
-    }
-    // (2) output must depend on input (catches fully-dead backends)
-    let depends = false;
-    for (let i = 0; i < va.length; i++) {
-      if (Math.abs(va[i] - vb[i]) > 1e-4) { depends = true; break; }
-    }
-    if (!depends) return false;
-    // (3) a healthy classifier is NOT ~99% confident in a single class on
-    // random RGB noise. A peaked one-hot output here means the backend is
-    // numerically degraded — the mobile float16-WebGL failure mode that
-    // input-dependence alone misses.
-    const noiseMax = Math.max(...vb);
-    if (noiseMax >= 0.97) {
-      dbg(`  rejecting: noise output peaked at ${noiseMax.toFixed(4)} (numerically degraded)`);
-      return false;
-    }
-    return true;
-  } catch (e) {
-    dbg(`  backendIsHealthy error: ${e && e.message || e}`);
-    return false;
-  }
+  await tf.setBackend("cpu"); // absolute fallback
+  return "cpu";
 }
 
 async function getModel() {
@@ -217,87 +110,32 @@ async function getModel() {
   setStatus("Loading model…");
   setRing("loading", "…");
   const tLoad = performance.now();
+  await selectBackend();
+  await tf.ready();
   modelLoading = (async () => {
-    checkModelBundles();
-    // Allow forcing a backend for diagnosis, e.g. ?backend=wasm or ?backend=cpu.
-    const forced = new URLSearchParams(location.search).get("backend");
-    // Mobile GPUs (e.g. S20+ / Adreno) render this graph model in float16 and
-    // collapse natural-image outputs to Neutral ~0.99 — silently wrong, and
-    // undetectable from synthetic probes. The GPU backends can't be trusted
-    // here, so on mobile we go straight to WASM (pure-CPU SIMD: numerically
-    // identical to the CPU backend but ~10x faster). Desktop keeps WebGL.
-    const isMobile =
-      (navigator.userAgentData && navigator.userAgentData.mobile) ||
-      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
-      (window.matchMedia && matchMedia("(pointer:coarse)").matches &&
-        Math.min(innerWidth, innerHeight) < 900);
-    const order = forced
-      ? [forced]
-      : isMobile ? ["wasm", "cpu"] : ["webgpu", "webgl", "wasm", "cpu"];
-    dbg(`isMobile=${isMobile}`);
-    // Mobile WebGL defaults to float16 (mediump) render textures, which
-    // collapses the MobileNetV2Mid conv stack on natural images (every frame
-    // -> Neutral ~0.99). Force float32 rendering for correctness; if the GPU
-    // can't render float32 targets tfjs silently keeps float16, and the
-    // validation below will reject the backend and fall through to WASM/CPU.
-    try { tf.env().set("WEBGL_RENDER_FLOAT32_ENABLED", true); } catch (e) { /* ignore */ }
-    // Configure the WASM backend explicitly. Without this, tfjs looks for the
-    // .wasm binaries relative to the page (-> 404 on Vercel) and silently fails
-    // back to the JS CPU backend. Use the explicit object form so every
-    // variant (plain / simd / threaded-simd) resolves to the jsDelivr CDN.
-    try {
-      if (tf.wasm) {
-        tf.wasm.setWasmPaths({
-          "tfjs-backend-wasm.wasm": WASM_PATH + "tfjs-backend-wasm.wasm",
-          "tfjs-backend-wasm-simd.wasm": WASM_PATH + "tfjs-backend-wasm-simd.wasm",
-          "tfjs-backend-wasm-threaded-simd.wasm": WASM_PATH + "tfjs-backend-wasm-threaded-simd.wasm",
-        });
-        dbg("wasm: setWasmPaths ok");
-      } else {
-        dbg("wasm: tf.wasm undefined (backend script not loaded?)");
-      }
-    } catch (e) { dbg("wasm: setWasmPaths error " + (e && e.message || e)); }
-    // NOTE: use findBackendFactory (not findBackend). findBackend() triggers an
-    // async init for registered-but-uninitialized backends (WASM) and returns
-    // null until that completes, which falsely looks "not registered" and made
-    // WASM fall back to CPU. findBackendFactory() returns the factory without
-    // initializing.
-    dbg(`wasm registered=${!!tf.findBackendFactory && !!tf.findBackendFactory("wasm")}`);
-    dbg(`backend order: ${order.join(",")}${forced ? " (forced via ?backend=)" : ""}`);
-    for (const name of order) {
-      try {
-        if (!tf.findBackendFactory(name)) { dbg(`backend ${name}: not registered`); continue; }
-        if (name === "webgl") {
-          try { dbg(`webgl float32 capable=${tf.env().get("WEBGL_RENDER_FLOAT32_CAPABLE")} enabled=${tf.env().get("WEBGL_RENDER_FLOAT32_ENABLED")}`); } catch (e) {}
-        }
-        const ok = await tf.setBackend(name);
-        if (!ok) { dbg(`backend ${name}: setBackend returned false`); continue; }
-        await tf.ready();
-        dbg(`backend ${name}: ready (backend=${tf.getBackend()})`);
-        setStatus(`Loading model (${name})…`);
-        const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
-        const healthy = await backendIsHealthy(m);
-        dbg(`backend ${name}: healthy=${healthy}`);
-        // If a backend is forced via ?backend=, keep it even if validation
-        // looks unhealthy so we can inspect its raw behavior.
-        if (healthy || forced) {
-          model = m;
-          dbg(`SELECTED backend: ${name}${forced ? " (forced)" : ""}`);
-          return m;
-        }
-        // Backend produced input-independent (dead) output — dispose and
-        // try the next backend. Common on mobile WebGL/WebGPU.
-        try { m.dispose(); } catch (e) { /* ignore */ }
-        setStatus(`Backend ${name} failed validation, retrying…`);
-      } catch (e) { dbg(`backend ${name}: error ${e && e.message || e}`); /* backend unavailable or load failed — try next */ }
+    // Load MobileNetV2Mid (~93% accuracy) as a graph model to cut false
+    // positives vs the default MobileNetV2 (~90%). Weights ship via three
+    // <script> tags in index.html (model + two shards); inference is local.
+    const w = window;
+    const modelJson = w.model;
+    const shard1 = w.group1_shard1of2;
+    const shard2 = w.group1_shard2of2;
+    if (!modelJson || !shard1 || !shard2) {
+      throw new Error(
+        "Model bundles missing. Hard-reload (Ctrl+Shift+R) to bust cache so " +
+          "index.html loads the three mobilenet_v2_mid <script> tags " +
+          "(model.min.js, group1-shard1of2.min.js, group1-shard2of2.min.js)."
+      );
     }
-    // Absolute fallback: CPU always works (just slow).
-    await tf.setBackend("cpu");
-    await tf.ready();
-    setStatus("Loading model (cpu)…");
+    const isGraph = modelJson.format === "graph-model";
+    if (!isGraph) {
+      throw new Error(
+        "Wrong model format (got " + (modelJson.format || "layers") +
+          "). Hard-reload (Ctrl+Shift+R) to load the mobilenet_v2_mid graph bundle."
+      );
+    }
     const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
     model = m;
-    dbg(`SELECTED backend: cpu (fallback)`);
     return m;
   })();
   modelLoading.then(() => {
@@ -419,9 +257,6 @@ async function runDetection() {
   statusCard.classList.remove("hidden");
   verdictCard.classList.add("hidden");
   perfEl.classList.add("hidden");
-  dbgFrameIndex = 0;
-  if (debugLog) debugLog.textContent = "";
-  dbg(`runDetection start | backend=${tf.getBackend()} | videoWidth=${video.videoWidth}x${video.videoHeight} dur=${video.duration}`);
   try {
     const m = await getModel();
     const results = await analyzeVideo(video, m);
@@ -542,23 +377,6 @@ async function classifyFrame(vid, m, cls, cctx, time) {
     scores[p.className] = +p.probability.toFixed(4);
     if (p.probability > top.probability) top = p;
   }
-  // Capture diagnostics for the first couple of frames so we can see, on the
-  // device, exactly what the model received and what it returned.
-  if (dbgFrameIndex < 2) {
-    const idx = dbgFrameIndex;
-    try {
-      if (debugThumb && idx === 0) {
-        const cx = debugThumb.getContext("2d");
-        cx.imageSmoothingEnabled = true;
-        cx.drawImage(cls, 0, 0, debugThumb.width, debugThumb.height);
-      }
-    } catch (e) { dbg(`frame ${idx} thumb: ${e.message}`); }
-    try { dbg(`frame ${idx} px: ${JSON.stringify(canvasStats(cctx, cls.width, cls.height))}`); } catch (e) { dbg(`frame ${idx} stats: ${e.message}`); }
-    const raw = preds.map((p) => `${p.className}:${+p.probability.toFixed(4)}`).join(" ");
-    dbg(`frame ${idx} preds: ${raw}`);
-    dbg(`frame ${idx} videoState: readyState=${vid.readyState} paused=${vid.paused} currentTime=${vid.currentTime.toFixed(2)}`);
-  }
-  dbgFrameIndex++;
   const inappropriateScore = +inappropriateMass(scores).toFixed(4);
   const inappropriate = inappropriateScore >= CFG.frameThreshold;
   return {
@@ -652,25 +470,7 @@ function calibrateSigmoid(samples, opts = {}) {
 function seekTo(vid, time) {
   return new Promise((resolve, reject) => {
     let done = false;
-    // The `seeked` event fires when the seek completes internally, but on
-    // mobile browsers (esp. iOS Safari) the video element's displayed frame
-    // is not yet repainted by the compositor. Drawing to canvas at that
-    // moment captures a stale/black frame, which the classifier scores as
-    // Neutral ~100% -> every frame reads "neutral 0". Wait for a real paint
-    // cycle before resolving so drawImage() reads the actual seeked frame.
-    const finish = () => { if (done) return; done = true; cleanup(); resolve(); };
-    const onSeeked = () => {
-      if (done) return;
-      if (typeof vid.requestVideoFrameCallback === "function") {
-        // Fires when a new frame has been presented to the compositor.
-        vid.requestVideoFrameCallback(finish);
-        // Fallback in case rVFC never fires (paused/seeked on some UAs).
-        setTimeout(finish, 60);
-      } else {
-        // Two rAFs guarantee the compositor has painted the new frame.
-        requestAnimationFrame(() => requestAnimationFrame(finish));
-      }
-    };
+    const onSeeked = () => { if (done) return; done = true; cleanup(); resolve(); };
     const onError = () => { if (done) return; done = true; cleanup(); reject(new Error("Seek failed")); };
     const cleanup = () => {
       vid.removeEventListener("seeked", onSeeked);
