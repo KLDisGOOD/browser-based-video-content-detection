@@ -575,7 +575,11 @@ function showResults({ result, meta, frames }) {
   verdictTag.classList.remove("safe", "flag");
   verdictTag.classList.add(flagged ? "flag" : "safe");
   verdictTag.textContent = flagged ? "Flagged" : "Appears safe";
-  verdictConf.textContent = `${Math.round(result.confidence * 100)}%`;
+  // Display confidence in the VERDICT: for safe videos, invert P(inappropriate)
+  // so a neutral/drawing video reads as ~95% confident-safe instead of ~5%
+  // inappropriate. The stored result.confidence stays P(inappropriate).
+  const displayConf = flagged ? result.confidence : 1 - result.confidence;
+  verdictConf.textContent = `${Math.round(displayConf * 100)}%`;
 
   resultJson.textContent = JSON.stringify(result, null, 2);
 
