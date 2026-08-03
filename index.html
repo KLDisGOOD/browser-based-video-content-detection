@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Video Content Detection</title>
   <link rel="stylesheet" href="styles.css?v=7" />
+  <style>
+    .debug-card { margin-top: 1rem; border: 1px solid #2a2a3a; border-radius: 10px; padding: .75rem; background: #12121a; }
+    .debug-title { font-size: .7rem; text-transform: uppercase; letter-spacing: .08em; color: #7a7a90; margin-bottom: .5rem; }
+    .debug-row { display: flex; gap: .75rem; align-items: flex-start; }
+    .debug-row canvas { width: 96px; height: 96px; border-radius: 6px; background: #000; flex: 0 0 96px; image-rendering: pixelated; }
+    .debug-log { flex: 1; margin: 0; font-size: .68rem; line-height: 1.25; color: #b9c6e6; white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto; }
+  </style>
 </head>
 <body>
   <main class="shell">
@@ -85,6 +92,15 @@
       <div id="perfGrid" class="perf-grid"></div>
     </section>
 
+    <!-- Debug (diagnostics: backend selection, frame pixels, raw predictions) -->
+    <section class="debug-card" id="debugCard">
+      <div class="debug-title">Debug</div>
+      <div class="debug-row">
+        <canvas id="debugThumb" width="224" height="224"></canvas>
+        <pre id="debugLog" class="debug-log">Waiting for model load…</pre>
+      </div>
+    </section>
+
   </main>
 
   <!-- TensorFlow.js + NSFW.js v4 (library + model + weight shard as separate bundles).
@@ -104,6 +120,6 @@
   <script src="https://cdn.jsdelivr.net/npm/nsfwjs@4.3.0/dist/models/mobilenet_v2_mid/group1-shard1of2.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/nsfwjs@4.3.0/dist/models/mobilenet_v2_mid/group1-shard2of2.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/nsfwjs@4.3.0/dist/browser/nsfwjs.min.js"></script>
-  <script src="app.js?v=9"></script>
+  <script src="app.js?v=10"></script>
 </body>
 </html>

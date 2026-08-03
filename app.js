@@ -62,12 +62,36 @@ const ringLabel = $("ringLabel");
 const resultJson = $("resultJson");
 const frameChart = $("frameChart");
 const frameList = $("frameList");
+const debugLog = $("debugLog");
+const debugThumb = $("debugThumb");
+
+// Visible + console debug log. Append-only; cleared at the start of each run.
+function dbg(msg) {
+  const line = msg == null ? "" : String(msg);
+  if (debugLog) debugLog.textContent += line + "\n";
+  console.log("%c[dbg] " + line, "color:#08f");
+}
+
+// Summarize the pixels of the classify canvas to detect black/empty frames.
+function canvasStats(cctx, w, h) {
+  let d;
+  try { d = cctx.getImageData(0, 0, w, h).data; } catch (e) { return { error: String(e) }; }
+  let sum = 0, min = 255, max = 0, n = w * h;
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = (d[i] + d[i + 1] + d[i + 2]) / 3;
+    sum += lum;
+    if (lum < min) min = lum;
+    if (lum > max) max = lum;
+  }
+  return { mean: Math.round(sum / n), min, max, uniform: max - min < 2, size: `${w}x${h}` };
+}
 
 // ---- State -------------------------------------------------------------
 let model = null;
 let modelLoading = null;
 let currentVideoURL = null;   // canonical URL the user typed (for messages)
 let currentVideoSrc = null;   // actual src assigned to <video> (url or blob:) — revoke if blob
+let dbgFrameIndex = 0;        // increments per classified frame; used for debug capture
 
 // ---- Tabs --------------------------------------------------------------
 document.querySelectorAll(".seg-item").forEach((t) =>
@@ -157,6 +181,9 @@ async function backendIsHealthy(m) {
     const b = await m.classify(syntheticCanvas(1));
     const va = a.map((p) => p.probability);
     const vb = b.map((p) => p.probability);
+    const fmt = (arr) => arr.map((x) => +x.toFixed(4)).join(",");
+    dbg(`  synth black: [${fmt(va)}]`);
+    dbg(`  synth noise: [${fmt(vb)}]`);
     if (!va.length || va.length !== vb.length) return false;
     for (let i = 0; i < va.length; i++) {
       if (!Number.isFinite(va[i]) || !Number.isFinite(vb[i])) return false;
@@ -164,6 +191,7 @@ async function backendIsHealthy(m) {
     }
     return false; // outputs identical across inputs => dead backend
   } catch (e) {
+    dbg(`  backendIsHealthy error: ${e && e.message || e}`);
     return false;
   }
 }
@@ -179,22 +207,25 @@ async function getModel() {
     const order = ["webgpu", "webgl", "wasm", "cpu"];
     for (const name of order) {
       try {
-        if (!tf.findBackend(name)) continue;
+        if (!tf.findBackend(name)) { dbg(`backend ${name}: not registered`); continue; }
         if (name === "wasm" && tf.wasm) tf.wasm.setWasmPaths(WASM_PATH);
         const ok = await tf.setBackend(name);
-        if (!ok) continue;
+        if (!ok) { dbg(`backend ${name}: setBackend returned false`); continue; }
         await tf.ready();
         setStatus(`Loading model (${name})…`);
         const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
-        if (await backendIsHealthy(m)) {
+        const healthy = await backendIsHealthy(m);
+        dbg(`backend ${name}: healthy=${healthy}`);
+        if (healthy) {
           model = m;
+          dbg(`SELECTED backend: ${name}`);
           return m;
         }
         // Backend produced input-independent (dead) output — dispose and
         // try the next backend. Common on mobile WebGL/WebGPU.
         try { m.dispose(); } catch (e) { /* ignore */ }
         setStatus(`Backend ${name} failed validation, retrying…`);
-      } catch (e) { /* backend unavailable or load failed — try next */ }
+      } catch (e) { dbg(`backend ${name}: error ${e && e.message || e}`); /* backend unavailable or load failed — try next */ }
     }
     // Absolute fallback: CPU always works (just slow).
     await tf.setBackend("cpu");
@@ -202,6 +233,7 @@ async function getModel() {
     setStatus("Loading model (cpu)…");
     const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
     model = m;
+    dbg(`SELECTED backend: cpu (fallback)`);
     return m;
   })();
   modelLoading.then(() => {
@@ -323,6 +355,9 @@ async function runDetection() {
   statusCard.classList.remove("hidden");
   verdictCard.classList.add("hidden");
   perfEl.classList.add("hidden");
+  dbgFrameIndex = 0;
+  if (debugLog) debugLog.textContent = "";
+  dbg(`runDetection start | backend=${tf.getBackend()} | videoWidth=${video.videoWidth}x${video.videoHeight} dur=${video.duration}`);
   try {
     const m = await getModel();
     const results = await analyzeVideo(video, m);
@@ -443,6 +478,23 @@ async function classifyFrame(vid, m, cls, cctx, time) {
     scores[p.className] = +p.probability.toFixed(4);
     if (p.probability > top.probability) top = p;
   }
+  // Capture diagnostics for the first couple of frames so we can see, on the
+  // device, exactly what the model received and what it returned.
+  if (dbgFrameIndex < 2) {
+    const idx = dbgFrameIndex;
+    try {
+      if (debugThumb && idx === 0) {
+        const cx = debugThumb.getContext("2d");
+        cx.imageSmoothingEnabled = true;
+        cx.drawImage(cls, 0, 0, debugThumb.width, debugThumb.height);
+      }
+    } catch (e) { dbg(`frame ${idx} thumb: ${e.message}`); }
+    try { dbg(`frame ${idx} px: ${JSON.stringify(canvasStats(cctx, cls.width, cls.height))}`); } catch (e) { dbg(`frame ${idx} stats: ${e.message}`); }
+    const raw = preds.map((p) => `${p.className}:${+p.probability.toFixed(4)}`).join(" ");
+    dbg(`frame ${idx} preds: ${raw}`);
+    dbg(`frame ${idx} videoState: readyState=${vid.readyState} paused=${vid.paused} currentTime=${vid.currentTime.toFixed(2)}`);
+  }
+  dbgFrameIndex++;
   const inappropriateScore = +inappropriateMass(scores).toFixed(4);
   const inappropriate = inappropriateScore >= CFG.frameThreshold;
   return {
