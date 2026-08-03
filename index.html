@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Video Content Detection</title>
+  <link rel="stylesheet" href="styles.css?v=7" />
+</head>
+<body>
+  <main class="shell">
+    <header class="head">
+      <div class="model-ring loading" id="modelRing" title="Model load time">
+        <svg viewBox="0 0 44 44" class="ring-svg">
+          <circle class="ring-track" cx="22" cy="22" r="19"></circle>
+          <circle class="ring-fill" cx="22" cy="22" r="19"></circle>
+        </svg>
+        <span class="ring-label" id="ringLabel">…</span>
+      </div>
+      <h1>Video Content Detection</h1>
+      <p>On-device. Nothing leaves the browser.</p>
+    </header>
+
+    <!-- Source picker -->
+    <section class="source" id="source">
+      <div class="seg" role="tablist">
+        <button class="seg-item active" data-tab="file" role="tab" aria-selected="true">Upload</button>
+        <button class="seg-item" data-tab="url" role="tab" aria-selected="false">Link</button>
+      </div>
+
+      <div class="panel active" id="panel-file">
+        <label class="drop" id="fileDrop">
+          <input type="file" id="fileInput" accept="video/*" hidden />
+          <span class="drop-title">Drop a video or click to choose</span>
+        </label>
+      </div>
+
+      <div class="panel" id="panel-url">
+        <div class="url-row">
+          <input type="url" id="urlInput" placeholder="https://example.com/video.mp4" aria-label="Video URL" />
+          <button id="urlLoadBtn" class="btn">Load</button>
+        </div>
+        <div class="url-tools">
+          <button id="sampleBtn" class="link">Try a sample</button>
+        </div>
+        <p class="micro">Some links won't load or scan because the host blocks cross-origin access (CORS). <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS" target="_blank" rel="noopener noreferrer">Learn more</a>. Uploading the file directly always works.</p>
+      </div>
+    </section>
+
+    <!-- Player -->
+    <section class="player hidden" id="videoCard">
+      <div class="stage" id="videoWrap">
+        <video id="video" playsinline muted></video>
+        <div class="overlay hidden" id="blurOverlay"></div>
+        <div class="badge hidden" id="liveBadge"></div>
+      </div>
+      <div class="bar">
+        <button id="detectBtn" class="btn primary" disabled>Detect content</button>
+        <label class="toggle"><input type="checkbox" id="blurToggle" checked /><span>Blur if flagged</span></label>
+      </div>
+    </section>
+
+    <!-- Progress -->
+    <section class="progress-card hidden" id="statusCard">
+      <div class="progress-line"><span id="statusText">Idle</span><span id="progressPct">0%</span></div>
+      <div class="track"><div id="progressBar"></div></div>
+    </section>
+
+    <!-- Verdict -->
+    <section class="verdict hidden" id="verdictCard">
+      <div class="verdict-head">
+        <div id="verdictTag" class="vtag">—</div>
+        <div class="vconf"><span id="verdictConf">0%</span><span class="vconf-label">confidence</span></div>
+      </div>
+      <pre id="resultJson" class="json"></pre>
+      <div id="frameChart" class="chart"></div>
+      <details class="frames-detail"><summary>Per-frame breakdown</summary><div id="frameList" class="frame-list"></div></details>
+    </section>
+
+    <!-- Performance -->
+    <section class="perf-card hidden" id="perfCard">
+      <div class="perf-title">Performance</div>
+      <div id="perfGrid" class="perf-grid"></div>
+    </section>
+
+  </main>
+
+  <!-- TensorFlow.js + NSFW.js v4 (library + model + weight shard as separate bundles).
+       Static assets fetched once and cached; inference runs entirely in-browser.
+       The monolithic @tensorflow/tfjs bundle ships with the WebGL + CPU backends.
+       The WebGPU and WASM backends are separate packages, loaded below so
+       getModel() can fall back WebGPU → WebGL → WASM → CPU in that order. -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+  <!-- WebGPU backend: fastest path on supporting browsers (Chrome/Edge). -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgpu@4.22.0/dist/tf-backend-webgpu.min.js"></script>
+  <!-- WASM backend: pure-CPU SIMD path, used when neither GPU path is available
+       (e.g. Safari without WebGL2, or locked-down mobile WebViews). -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.22.0/dist/tf-backend-wasm.min.js"></script>
+  <!-- MobileNetV2Mid (~93% accuracy) is a graph model with two weight shards,
+       vs the default MobileNetV2 (~90%) which is a layers model with one shard. -->
+  <script src="https://cdn.jsdelivr.net/npm/nsfwjs@4.3.0/dist/models/mobilenet_v2_mid/model.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nsfwjs@4.3.0/dist/models/mobilenet_v2_mid/group1-shard1of2.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nsfwjs@4.3.0/dist/models/mobilenet_v2_mid/group1-shard2of2.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/nsfwjs@4.3.0/dist/browser/nsfwjs.min.js"></script>
+  <script src="app.js?v=7"></script>
+</body>
+</html>

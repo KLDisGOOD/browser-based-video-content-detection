@@ -1,0 +1,15 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Deps (not used, but ignore if added later)
+node_modules/
+
+# Vercel
+.vercel/
+
+# Local tooling that should never be committed
+.agents/
+skills-lock.json
