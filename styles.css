@@ -43,6 +43,24 @@ body {
 
 /* Header */
 .head { position: relative; margin-bottom: 28px; }
+.overview-link {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 550;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.overview-link:hover { border-color: var(--text); background: var(--accent-soft); }
 .head h1 {
   margin: 0;
   font-size: 1.5rem;
