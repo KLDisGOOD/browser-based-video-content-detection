@@ -204,7 +204,10 @@ async function getModel() {
   const tLoad = performance.now();
   modelLoading = (async () => {
     checkModelBundles();
-    const order = ["webgpu", "webgl", "wasm", "cpu"];
+    // Allow forcing a backend for diagnosis, e.g. ?backend=wasm or ?backend=cpu.
+    const forced = new URLSearchParams(location.search).get("backend");
+    const order = forced ? [forced] : ["webgpu", "webgl", "wasm", "cpu"];
+    dbg(`backend order: ${order.join(",")}${forced ? " (forced via ?backend=)" : ""}`);
     for (const name of order) {
       try {
         if (!tf.findBackend(name)) { dbg(`backend ${name}: not registered`); continue; }
@@ -216,9 +219,11 @@ async function getModel() {
         const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
         const healthy = await backendIsHealthy(m);
         dbg(`backend ${name}: healthy=${healthy}`);
-        if (healthy) {
+        // If a backend is forced via ?backend=, keep it even if validation
+        // looks unhealthy so we can inspect its raw behavior.
+        if (healthy || forced) {
           model = m;
-          dbg(`SELECTED backend: ${name}`);
+          dbg(`SELECTED backend: ${name}${forced ? " (forced)" : ""}`);
           return m;
         }
         // Backend produced input-independent (dead) output — dispose and
