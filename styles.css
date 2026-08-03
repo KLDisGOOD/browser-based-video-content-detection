@@ -43,10 +43,13 @@ body {
 
 /* Header */
 .head { position: relative; margin-bottom: 28px; }
+.head-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
 .overview-link {
-  position: absolute;
-  top: -2px;
-  left: 0;
   display: inline-flex;
   align-items: center;
   padding: 7px 14px;
@@ -75,11 +78,10 @@ body {
 
 /* Model-load ring (top-right of the header) */
 .model-ring {
-  position: absolute;
-  top: -2px;
-  right: 0;
+  position: relative;
   width: 44px;
   height: 44px;
+  flex: 0 0 auto;
 }
 .ring-svg { width: 100%; height: 100%; transform: rotate(-90deg); }
 .ring-track { fill: none; stroke: var(--line); stroke-width: 3; }
