@@ -221,24 +221,54 @@ async function getModel() {
     checkModelBundles();
     // Allow forcing a backend for diagnosis, e.g. ?backend=wasm or ?backend=cpu.
     const forced = new URLSearchParams(location.search).get("backend");
-    const order = forced ? [forced] : ["webgpu", "webgl", "wasm", "cpu"];
+    // Mobile GPUs (e.g. S20+ / Adreno) render this graph model in float16 and
+    // collapse natural-image outputs to Neutral ~0.99 — silently wrong, and
+    // undetectable from synthetic probes. The GPU backends can't be trusted
+    // here, so on mobile we go straight to WASM (pure-CPU SIMD: numerically
+    // identical to the CPU backend but ~10x faster). Desktop keeps WebGL.
+    const isMobile =
+      (navigator.userAgentData && navigator.userAgentData.mobile) ||
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ||
+      (window.matchMedia && matchMedia("(pointer:coarse)").matches &&
+        Math.min(innerWidth, innerHeight) < 900);
+    const order = forced
+      ? [forced]
+      : isMobile ? ["wasm", "cpu"] : ["webgpu", "webgl", "wasm", "cpu"];
+    dbg(`isMobile=${isMobile}`);
     // Mobile WebGL defaults to float16 (mediump) render textures, which
     // collapses the MobileNetV2Mid conv stack on natural images (every frame
     // -> Neutral ~0.99). Force float32 rendering for correctness; if the GPU
     // can't render float32 targets tfjs silently keeps float16, and the
     // validation below will reject the backend and fall through to WASM/CPU.
     try { tf.env().set("WEBGL_RENDER_FLOAT32_ENABLED", true); } catch (e) { /* ignore */ }
+    // Configure the WASM backend explicitly. Without this, tfjs looks for the
+    // .wasm binaries relative to the page (-> 404 on Vercel) and silently fails
+    // back to the JS CPU backend. Use the explicit object form so every
+    // variant (plain / simd / threaded-simd) resolves to the jsDelivr CDN.
+    try {
+      if (tf.wasm) {
+        tf.wasm.setWasmPaths({
+          "tfjs-backend-wasm.wasm": WASM_PATH + "tfjs-backend-wasm.wasm",
+          "tfjs-backend-wasm-simd.wasm": WASM_PATH + "tfjs-backend-wasm-simd.wasm",
+          "tfjs-backend-wasm-threaded-simd.wasm": WASM_PATH + "tfjs-backend-wasm-threaded-simd.wasm",
+        });
+        dbg("wasm: setWasmPaths ok");
+      } else {
+        dbg("wasm: tf.wasm undefined (backend script not loaded?)");
+      }
+    } catch (e) { dbg("wasm: setWasmPaths error " + (e && e.message || e)); }
+    dbg(`wasm registered=${!!tf.findBackend("wasm")}`);
     dbg(`backend order: ${order.join(",")}${forced ? " (forced via ?backend=)" : ""}`);
     for (const name of order) {
       try {
         if (!tf.findBackend(name)) { dbg(`backend ${name}: not registered`); continue; }
-        if (name === "wasm" && tf.wasm) tf.wasm.setWasmPaths(WASM_PATH);
         if (name === "webgl") {
           try { dbg(`webgl float32 capable=${tf.env().get("WEBGL_RENDER_FLOAT32_CAPABLE")} enabled=${tf.env().get("WEBGL_RENDER_FLOAT32_ENABLED")}`); } catch (e) {}
         }
         const ok = await tf.setBackend(name);
         if (!ok) { dbg(`backend ${name}: setBackend returned false`); continue; }
         await tf.ready();
+        dbg(`backend ${name}: ready (backend=${tf.getBackend()})`);
         setStatus(`Loading model (${name})…`);
         const m = await nsfwjs.load("MobileNetV2Mid", { type: "graph" });
         const healthy = await backendIsHealthy(m);
