@@ -185,11 +185,26 @@ async function backendIsHealthy(m) {
     dbg(`  synth black: [${fmt(va)}]`);
     dbg(`  synth noise: [${fmt(vb)}]`);
     if (!va.length || va.length !== vb.length) return false;
+    // (1) finite outputs
     for (let i = 0; i < va.length; i++) {
       if (!Number.isFinite(va[i]) || !Number.isFinite(vb[i])) return false;
-      if (Math.abs(va[i] - vb[i]) > 1e-4) return true; // input-dependent => alive
     }
-    return false; // outputs identical across inputs => dead backend
+    // (2) output must depend on input (catches fully-dead backends)
+    let depends = false;
+    for (let i = 0; i < va.length; i++) {
+      if (Math.abs(va[i] - vb[i]) > 1e-4) { depends = true; break; }
+    }
+    if (!depends) return false;
+    // (3) a healthy classifier is NOT ~99% confident in a single class on
+    // random RGB noise. A peaked one-hot output here means the backend is
+    // numerically degraded — the mobile float16-WebGL failure mode that
+    // input-dependence alone misses.
+    const noiseMax = Math.max(...vb);
+    if (noiseMax >= 0.97) {
+      dbg(`  rejecting: noise output peaked at ${noiseMax.toFixed(4)} (numerically degraded)`);
+      return false;
+    }
+    return true;
   } catch (e) {
     dbg(`  backendIsHealthy error: ${e && e.message || e}`);
     return false;
@@ -207,11 +222,20 @@ async function getModel() {
     // Allow forcing a backend for diagnosis, e.g. ?backend=wasm or ?backend=cpu.
     const forced = new URLSearchParams(location.search).get("backend");
     const order = forced ? [forced] : ["webgpu", "webgl", "wasm", "cpu"];
+    // Mobile WebGL defaults to float16 (mediump) render textures, which
+    // collapses the MobileNetV2Mid conv stack on natural images (every frame
+    // -> Neutral ~0.99). Force float32 rendering for correctness; if the GPU
+    // can't render float32 targets tfjs silently keeps float16, and the
+    // validation below will reject the backend and fall through to WASM/CPU.
+    try { tf.env().set("WEBGL_RENDER_FLOAT32_ENABLED", true); } catch (e) { /* ignore */ }
     dbg(`backend order: ${order.join(",")}${forced ? " (forced via ?backend=)" : ""}`);
     for (const name of order) {
       try {
         if (!tf.findBackend(name)) { dbg(`backend ${name}: not registered`); continue; }
         if (name === "wasm" && tf.wasm) tf.wasm.setWasmPaths(WASM_PATH);
+        if (name === "webgl") {
+          try { dbg(`webgl float32 capable=${tf.env().get("WEBGL_RENDER_FLOAT32_CAPABLE")} enabled=${tf.env().get("WEBGL_RENDER_FLOAT32_ENABLED")}`); } catch (e) {}
+        }
         const ok = await tf.setBackend(name);
         if (!ok) { dbg(`backend ${name}: setBackend returned false`); continue; }
         await tf.ready();
