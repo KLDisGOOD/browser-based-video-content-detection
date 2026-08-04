@@ -543,33 +543,9 @@ await tf.setBackend('webgpu')   <span class="comment">// fastest, where supporte
     </div>
 
     <div class="subsection">
-      <h3>Performance table</h3>
-      <div class="prose">
-        <p>The prototype prints these metrics after each run. Empty cells are values to capture on the target hardware; browser-ML performance varies too widely across devices for a single number.</p>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr><th>Metric</th><th>Result</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>Device</td><td></td></tr>
-            <tr><td>Browser</td><td></td></tr>
-            <tr><td>Video Resolution</td><td></td></tr>
-            <tr><td>Video Duration</td><td></td></tr>
-            <tr><td>Frames Analyzed</td><td></td></tr>
-            <tr><td>Processing Time</td><td></td></tr>
-            <tr><td>Throughput</td><td></td></tr>
-            <tr><td>TensorFlow.js Backend</td><td></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-    <div class="subsection">
       <h3>Benchmark screenshots</h3>
       <div class="prose">
-        <p>The prototype prints the metrics above after each run. The following screenshots are captured from real runs across a range of target devices. Browser-ML performance varies too widely across hardware for a single number to be meaningful, so each device is reported individually.</p>
+        <p>The prototype prints its metrics after each run. The following screenshots are captured from real runs across a range of target devices. Browser-ML performance varies too widely across hardware for a single number to be meaningful, so each device is reported individually.</p>
       </div>
 
       <div class="figure">
@@ -856,7 +832,7 @@ await tf.setBackend('webgpu')   <span class="comment">// fastest, where supporte
         <li><strong>False positives and false negatives are expected.</strong> The model is a probabilistic classifier, not an oracle. Beach, medical, and skin-heavy-but-neutral frames can trigger; stylized or drawn content can evade. Thresholds bias one direction but cannot eliminate errors.</li>
         <li><strong>The prototype model is not trained for a specific taxonomy.</strong> NSFW.js's five classes are generic; a product with a specific policy needs a model whose classes match it.</li>
         <li><strong>Confidence calibration needs labeled data.</strong> Shipped thresholds are hand-picks. Reliable probability calibration would require a labeled validation set together with techniques such as Platt scaling or isotonic regression.</li>
-        <li><strong>Hardware performance varies.</strong> The same scan can take seconds on a flagship and tens of seconds on a low-end phone, which is why the §5 table is a template, not a single number.</li>
+        <li><strong>Hardware performance varies.</strong> The same scan can take seconds on a flagship and tens of seconds on a low-end phone, which is why the §5 benchmarks are reported per device, not as a single number.</li>
       </ul>
     </div>
   </section>
@@ -872,11 +848,10 @@ await tf.setBackend('webgpu')   <span class="comment">// fastest, where supporte
       <h3>Short-term</h3>
       <div class="prose">
         <ul>
-          <li><strong>Benchmark across devices.</strong> Fill the §5 table across a device matrix (flagship, mid-range, low-end Android, iOS Safari) and pin the backend per device class instead of auto-fallback.</li>
           <li><strong>Larger evaluation dataset.</strong> A labeled corpus spanning the product's real categories, including edge cases (beach, medical, art, animation).</li>
           <li><strong>Confidence calibration.</strong> Sweep per-frame and video-level thresholds against the labeled set; report precision, recall, F1, latency, memory, and energy; pick by the chosen operating point.</li>
         </ul>
-      </div>
+      </div> 
     </div>
 
     <div class="subsection">
