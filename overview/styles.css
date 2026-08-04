@@ -426,10 +426,20 @@ code {
 .figure-frame.is-screenshot {
   padding: 0;
   background: var(--gray-8);
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.figure-frame.is-screenshot img {
+  width: 100%;
+  height: auto;
 }
 
 .figure-frame.is-screenshot + .figure-caption {
   margin-top: 12px;
+  max-width: 480px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .figure-caption {
